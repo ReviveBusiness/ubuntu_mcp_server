@@ -716,6 +716,57 @@ def create_development_policy() -> SecurityPolicy:
     )
 
 
+def create_system_admin_policy() -> SecurityPolicy:
+    """System administration policy — allows sudo-scoped ops tooling (systemctl, docker, kubectl).
+    Intended for trusted operators running as mcp-svc with scoped NOPASSWD sudoers.
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return SecurityPolicy(
+        allowed_paths=["/", "/etc", "/var", "/opt", "/home", "/tmp", "/var/tmp", "/usr"],
+        forbidden_paths=["/etc/shadow", "/etc/gshadow", "/root/.ssh", "/boot/efi"],
+        max_command_timeout=120,
+        max_file_size=50 * 1024 * 1024,   # 50MB
+        max_output_size=5 * 1024 * 1024,   # 5MB
+        max_directory_items=2000,
+        allow_sudo=True,                   # mcp-svc sudoers controls what can be sudo'd
+        resolve_symlinks=True,
+        check_file_permissions=False,
+        audit_actions=True,
+        use_path_cache=False,
+        use_shell_exec=False,
+        command_whitelist_mode=True,
+        allowed_commands=[
+            # Service management (NOPASSWD via sudoers)
+            "systemctl", "journalctl",
+            # Process management
+            "kill", "killall", "ps", "top", "htop",
+            # Container/orchestration (NOPASSWD via sudoers)
+            "docker", "kubectl",
+            # Network diagnostics
+            "ip", "ss", "netstat", "curl", "ping", "dig", "nslookup",
+            # System info
+            "df", "du", "free", "uptime", "uname", "hostname",
+            "who", "w", "last", "lscpu", "lsblk",
+            # File operations
+            "ls", "cat", "head", "tail", "grep", "find", "which",
+            "echo", "wc", "sort", "stat", "mkdir", "rm", "cp", "mv",
+            "chmod", "chown", "touch", "diff", "awk", "sed", "cut", "tr",
+            # Archive
+            "tar", "gzip", "gunzip",
+            # Package info only (no install)
+            "dpkg", "apt-cache",
+        ],
+        forbidden_commands=[
+            "dd", "mkfs", "fdisk", "cfdisk", "parted", "wipefs",
+            "shutdown", "reboot", "halt", "poweroff", "init",
+            "passwd", "useradd", "userdel", "usermod", "su",
+            "apt", "apt-get", "snap",
+        ],
+        server_executable_paths={script_dir, os.path.dirname(script_dir)},
+        system_critical_paths={"/boot", "/sys", "/proc", "/dev"}
+    )
+
+
 def create_ubuntu_mcp_server(security_policy: SecurityPolicy) -> FastMCP:
     """Create and configure the secure Ubuntu MCP server"""
     controller = SecureUbuntuController(security_policy)
@@ -958,7 +1009,7 @@ async def test_controller():
 async def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(description="Secure Ubuntu MCP Server")
-    parser.add_argument("--policy", choices=["secure", "dev"], default="secure", help="Security policy to use")
+    parser.add_argument("--policy", choices=["secure", "dev", "system_admin"], default="secure", help="Security policy to use")
     parser.add_argument("--test", action="store_true", help="Run functionality tests")
     parser.add_argument("--security-test", action="store_true", help="Run security validation tests")
     parser.add_argument("--log-level", default="INFO", help="Logging level (e.g., DEBUG, INFO, WARNING)")
@@ -977,6 +1028,8 @@ async def main():
 
     if args.policy == "dev":
         policy = create_development_policy()
+    elif args.policy == "system_admin":
+        policy = create_system_admin_policy()
     else:
         policy = create_secure_policy()
 
